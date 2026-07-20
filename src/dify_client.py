@@ -21,7 +21,10 @@ class DifyClient:
         if os.path.exists(key_path):
             with open(key_path, encoding="utf-8") as f:
                 return f.read().strip()
-        raise ValueError("Dify API Key 未设置")
+        # 允许 mock 模式：如果没有 key.txt 但给了 base_url + api_key 构造参数则跳过
+        if self.api_key:
+            return self.api_key
+        raise ValueError("Dify API Key 未设置：既无 key.txt 也无 api_key 参数")
 
     def retrieve(self, query: str, top_k: int = 5, score_threshold: float = 0.5) -> list[RetrievalResult]:
         url = f"{self.base_url}/datasets/{self.kb_id}/retrieve"
@@ -40,13 +43,17 @@ class DifyClient:
                 "Authorization": f"Bearer {self.api_key}",
             }
         )
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        return [
-            RetrievalResult(content=r.get("content",""), score=r.get("score",0),
-                            title=r.get("title",""), metadata=r.get("metadata",{}))
-            for r in data.get("records", [])
-        ]
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            return [
+                RetrievalResult(content=r.get("content",""), score=r.get("score",0),
+                                title=r.get("title",""), metadata=r.get("metadata",{}))
+                for r in data.get("records", [])
+            ]
+        except Exception as e:
+            print(f"[DifyClient] 检索失败（返回空结果）: {e}")
+            return []
 
     def retrieve_formatted(self, query: str, top_k: int = 5) -> str:
         results = self.retrieve(query, top_k=top_k)
