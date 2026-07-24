@@ -1,0 +1,22 @@
+# ============================================================
+# RuyiLearningPlanner — Web Frontend
+# ============================================================
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY apps/learning-web/package.json apps/learning-web/package-lock.json* ./
+RUN npm ci
+
+COPY apps/learning-web/ .
+RUN npm run build
+
+# ── serve via nginx ────────────────────────────────────────
+FROM nginx:alpine
+
+COPY --from=builder /app/dist /usr/share/nginx/html
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

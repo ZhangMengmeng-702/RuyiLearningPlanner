@@ -1,0 +1,49 @@
+# ============================================================
+# RuyiLearningPlanner — Docker Compose
+# ============================================================
+#
+# 启动:  docker compose -f docker/docker-compose.yaml up -d
+# 停止:  docker compose -f docker/docker-compose.yaml down
+#
+# 依赖:  Dify 需先运行（D:/ai/RuyiDify/docker/）
+#        如果 Dify 在同一台机器，网络会自动联通。
+#============================================================
+
+services:
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    container_name: rlp-api
+    env_file:
+      - ../.env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../data:/app/data
+    networks:
+      - rlp-net
+      # 连接 Dify 网络以便通过容器名访问 Dify API
+      - dify_default
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    container_name: rlp-web
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+    networks:
+      - rlp-net
+    restart: unless-stopped
+
+networks:
+  rlp-net:
+    driver: bridge
+  dify_default:
+    name: docker_default
+    external: true
