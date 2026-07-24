@@ -1,7 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
 import path from 'path'
 
 const packageJson = JSON.parse(
@@ -96,14 +95,7 @@ export default defineConfig({
     __APP_PACKAGE_VERSION__: JSON.stringify(packageJson.version ?? '0.0.0'),
     __APP_BUILD_TIME__: JSON.stringify(buildTime),
   },
-  plugins: [
-    tailwindcss(),
-    react({
-      babel: {
-        plugins: [['babel-plugin-react-compiler']],
-      },
-    }),
-  ],
+  plugins: [react()],
   server: {
     host: '0.0.0.0',  // 允许公网访问
     port: 5173,       // 默认端口

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 EXEMPT_PATHS = frozenset({
     "/api/v1/auth/login",
+    "/api/v1/auth/register",
     "/api/v1/auth/status",
     "/api/health",
     "/api/v1/health",
@@ -53,7 +54,8 @@ class AuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         cookie_val = request.cookies.get(COOKIE_NAME)
-        if not cookie_val or not verify_session(cookie_val):
+        session = verify_session(cookie_val) if cookie_val else None
+        if not session:
             return JSONResponse(
                 status_code=401,
                 content={
@@ -61,6 +63,12 @@ class AuthMiddleware(BaseHTTPMiddleware):
                     "message": "Login required",
                 },
             )
+
+        # 将用户信息注入 request.state，供后续接口使用
+        request.state.user = {
+            "user_id": session["user_id"],
+            "username": session["username"],
+        }
 
         return await call_next(request)
 

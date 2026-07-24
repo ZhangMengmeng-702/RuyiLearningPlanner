@@ -4,7 +4,9 @@ import json, os, time
 from dataclasses import dataclass, asdict
 from typing import Optional
 
-DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "profiles")
+from src.utils.path_security import safe_user_id, PathSecurityError
+
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "profiles"))
 
 @dataclass
 class Profile:
@@ -23,14 +25,18 @@ class Profile:
 
 class ProfileManager:
     def __init__(self, data_dir: str = DATA_DIR):
-        self.data_dir = data_dir
-        os.makedirs(data_dir, exist_ok=True)
+        self.data_dir = os.path.abspath(data_dir)
+        os.makedirs(self.data_dir, exist_ok=True)
 
     def _path(self, user_id: str) -> str:
-        return os.path.join(self.data_dir, f"{user_id}.json")
+        safe_id = safe_user_id(user_id)
+        return os.path.join(self.data_dir, f"{safe_id}.json")
 
     def get(self, user_id: str) -> Optional[Profile]:
-        path = self._path(user_id)
+        try:
+            path = self._path(user_id)
+        except PathSecurityError:
+            return None
         if not os.path.exists(path):
             return None
         with open(path, encoding="utf-8") as f:
@@ -38,7 +44,8 @@ class ProfileManager:
         return Profile(**data)
 
     def create(self, user_id: str) -> Profile:
-        profile = Profile(user_id=user_id, created_at=time.time(), updated_at=time.time())
+        safe_id = safe_user_id(user_id)
+        profile = Profile(user_id=safe_id, created_at=time.time(), updated_at=time.time())
         self.save(profile)
         return profile
 
@@ -48,7 +55,8 @@ class ProfileManager:
             json.dump(asdict(profile), f, ensure_ascii=False, indent=2)
 
     def update(self, user_id: str, **kwargs) -> Profile:
-        profile = self.get(user_id) or self.create(user_id)
+        safe_id = safe_user_id(user_id)
+        profile = self.get(safe_id) or self.create(safe_id)
         for k, v in kwargs.items():
             if hasattr(profile, k) and v is not None:
                 setattr(profile, k, v)

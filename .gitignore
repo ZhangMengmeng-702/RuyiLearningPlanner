@@ -6,7 +6,7 @@
 .env.*.local
 
 # 测试文件（可能包含敏感配置）
-# 仅忽略仓库根目录下的临时 test_*.py 脚本；tests/ 目录下的单元测试需要纳入版本控制。
+# 仅忽略仓库根目录下的临时 test_*.py 脚本；tests/ 目录下的测试需要纳入版本控制。
 /test_*.py
 /test.sh
 
@@ -92,7 +92,7 @@ verify_*.py
 static/
 /apps/ruyi-desktop/dist/
 /apps/ruyi-desktop/node_modules/
-docs/specs/
+/docs/specs/
 
 # 运行时日志/错误输出（根目录）
 /ea.txt
@@ -108,3 +108,8 @@ key.txt
 .env
 .env.local
 key.txt
+
+# 前端依赖
+apps/learning-web/node_modules/
+apps/learning-web/package-lock.jsonapps/learning-web/node_modules/
+apps/learning-web/package-lock.json

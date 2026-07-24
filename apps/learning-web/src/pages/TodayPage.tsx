@@ -1,199 +1,223 @@
-import React, { useEffect, useState } from 'react';
-import type { DailyTask, StudyPlan } from '../types';
-
-interface CheckinPayload {
-  user_id: string;
-  plan_id: string;
-  day: number;
-  tasks_completed: string[];
-  difficulty_rating: number;
-  completion_pct: number;
-  time_spent_hours: number;
-  feedback_text: string;
-}
+import React, { useState, useEffect, useMemo } from 'react';
+import { useParams } from 'react-router-dom';
+import { useAppStore } from '../store/appStore';
+import { apiGet, apiPost } from '../services/api';
+import { TaskList } from '../components/learn/TaskList';
+import { ProgressRing } from '../components/learn/ProgressRing';
+import { FeedbackForm } from '../components/learn/FeedbackForm';
+import { useAuth } from '../hooks/useAuth';
+import type { TaskItem, StudyPlan, ProgressStats } from '../types';
+import { getTasksForDay, normalizePlan } from '../utils/taskUtils';
 
 export default function TodayPage() {
+  const { userId: authUserId } = useAuth();
+  const { currentPlan, currentPlanId, todayCheckedIds, todayCheckin, toggleTodayTask, setTodayCheckin, setTodayCheckedIds, setCurrentPlan } = useAppStore();
   const [plan, setPlan] = useState<StudyPlan | null>(null);
-  const [todaysTasks, setTodaysTasks] = useState<DailyTask[]>([]);
-  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
-  const [difficulty, setDifficulty] = useState(3);
-  const [completion, setCompletion] = useState(50);
-  const [hours, setHours] = useState(0);
-  const [feedback, setFeedback] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [stats, setStats] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [stats, setStats] = useState<ProgressStats | null>(null);
+  const [adjustedInfo, setAdjustedInfo] = useState<{ adjusted: boolean; reason: string } | null>(null);
+
+  const targetPlanId = currentPlanId || 'latest';
 
   useEffect(() => {
-    // 获取计划 + 今日任务
-    const planId = new URLSearchParams(window.location.search).get('plan_id') || 'latest';
-    fetch(`http://localhost:8000/api/v1/learn/plan/${planId}`)
-      .then(r => r.json())
+    if (!authUserId) return;
+    if (currentPlan && (currentPlan.plan_id === targetPlanId || targetPlanId === 'latest')) {
+      setPlan(currentPlan);
+      setLoading(false);
+    } else {
+      setLoading(true);
+      const url = targetPlanId === 'latest'
+        ? `/v1/learn/plan/latest?user_id=${authUserId}`
+        : `/v1/learn/plan/${targetPlanId}`;
+      apiGet<StudyPlan>(url)
+        .then(data => setPlan(normalizePlan(data)))
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+  }, [targetPlanId, currentPlan, authUserId]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    apiGet<ProgressStats>(`/v1/progress/stats/${authUserId}?plan_id=${targetPlanId}`)
+      .then(setStats)
+      .catch(() => {});
+  }, [targetPlanId, authUserId]);
+
+  useEffect(() => {
+    if (!authUserId) return;
+    apiGet<any>(`/v1/progress/checkin/today/${authUserId}?plan_id=${targetPlanId}`)
       .then(data => {
-        setPlan(data);
-        const today = new Date();
-        const dayOfPlan = Math.ceil((today.getTime() - new Date(data.created_at).getTime()) / 86400000) + 1;
-        const tasks = (data.daily_tasks || []).filter((t: DailyTask) => t.day === dayOfPlan || t.day === 1);
-        setTodaysTasks(tasks.length > 0 ? tasks : (data.daily_tasks || []).slice(0, 3));
-      });
-    // 获取进度统计
-    fetch(`http://localhost:8000/api/v1/progress/stats/demo_user?plan_id=${planId}`)
-      .then(r => r.json()).then(d => setStats(d)).catch(() => {});
-  }, []);
+        setTodayCheckin(data);
+        if (data.checked_in && data.tasks_completed) {
+          setTodayCheckedIds(data.tasks_completed);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetPlanId, authUserId]);
+
+  const [todaysTasks, setTodaysTasks] = useState<TaskItem[]>([]);
+  const [difficulty, setDifficulty] = useState(3);
+  const [hours, setHours] = useState(0);
+  const [feedback, setFeedback] = useState('');
+
+  useEffect(() => {
+    if (!plan?.daily_tasks) return;
+    const today = new Date();
+    const dayOfPlan = Math.max(1, Math.ceil((today.getTime() - new Date(plan.created_at).getTime()) / 86400000) + 1);
+    const tasks = getTasksForDay(plan.daily_tasks, dayOfPlan);
+    setTodaysTasks(tasks.length > 0 ? tasks : plan.daily_tasks.slice(0, 3).map((t, i) => ({ ...t, id: t.id || `task_${i}` })));
+    
+    // 如果计划已被调整，显示调整信息
+    if (plan.adjusted && plan.adjust_reason) {
+      setAdjustedInfo({ adjusted: true, reason: plan.adjust_reason });
+    }
+  }, [plan]);
+
+  const checkedIdsSet = useMemo(() => new Set(todayCheckedIds), [todayCheckedIds]);
+
+  const completion = useMemo(() => {
+    if (todaysTasks.length === 0) return 0;
+    return Math.round((checkedIdsSet.size / todaysTasks.length) * 100);
+  }, [checkedIdsSet, todaysTasks]);
+
+  const submitted = todayCheckin?.checked_in ?? false;
 
   const handleCheckin = async () => {
-    const payload: CheckinPayload = {
-      user_id: 'demo_user',
-      plan_id: plan?.plan_id || 'latest',
-      day: todaysTasks[0]?.day || 1,
-      tasks_completed: Array.from(checkedIds),
-      difficulty_rating: difficulty,
-      completion_pct: completion,
-      time_spent_hours: hours,
-      feedback_text: feedback,
-    };
-    const resp = await fetch('http://localhost:8000/api/v1/progress/checkin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    if (resp.ok) {
-      setSubmitted(true);
-      setStats(prev => prev ? {
-        ...prev,
-        total_days: (prev.total_days || 0) + 1,
-        streak: (prev.streak || 0) + 1,
-      } : null);
+    if (!authUserId) return;
+    try {
+      const result: any = await apiPost('/v1/progress/checkin', {
+        user_id: authUserId,
+        plan_id: targetPlanId,
+        day: todaysTasks[0]?.day || 1,
+        tasks_completed: Array.from(todayCheckedIds),
+        difficulty_rating: difficulty,
+        completion_pct: completion,
+        time_spent_hours: hours,
+        feedback_text: feedback,
+      });
+      const data = await apiGet<any>(`/v1/progress/checkin/today/${authUserId}?plan_id=${targetPlanId}`);
+      setTodayCheckin(data);
+      const statsData = await apiGet<ProgressStats>(`/v1/progress/stats/${authUserId}?plan_id=${targetPlanId}`);
+      setStats(statsData);
+
+      // 如果计划被自动调整了，显示提示并重新加载计划
+      if (result?.adjusted) {
+        setAdjustedInfo({ adjusted: true, reason: result.adjust_reason || '计划已自动调整' });
+        // 重新加载计划数据
+        const url = targetPlanId === 'latest'
+          ? `/v1/learn/plan/latest?user_id=${authUserId}`
+          : `/v1/learn/plan/${targetPlanId}`;
+        const newPlanData = await apiGet<StudyPlan>(url);
+        const normalized = normalizePlan(newPlanData);
+        setPlan(normalized);
+        setCurrentPlan(normalized);
+        // 重新计算今日任务
+        if (normalized?.daily_tasks) {
+          const today = new Date();
+          const dayOfPlan = Math.max(1, Math.ceil((today.getTime() - new Date(normalized.created_at).getTime()) / 86400000) + 1);
+          const tasks = getTasksForDay(normalized.daily_tasks, dayOfPlan);
+          setTodaysTasks(tasks.length > 0 ? tasks : normalized.daily_tasks.slice(0, 3).map((t, i) => ({ ...t, id: t.id || `task_${i}` })));
+        }
+      }
+    } catch (err: any) {
+      alert(err?.message || '打卡失败');
     }
   };
 
   return (
     <div className="h-full overflow-y-auto bg-gray-950 p-6 space-y-6">
-      {/* 进度卡片 */}
-      {stats && (
-        <div className="grid grid-cols-4 gap-4">
-          <div className="bg-gray-800 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-white">{stats.total_days || 0}</div>
-            <div className="text-gray-400 text-xs mt-1">已完成天数</div>
-          </div>
-          <div className="bg-gray-800 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-emerald-400">{stats.streak || 0}</div>
-            <div className="text-gray-400 text-xs mt-1">连续打卡</div>
-          </div>
-          <div className="bg-gray-800 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-indigo-400">{stats.avg_completion_pct || 0}%</div>
-            <div className="text-gray-400 text-xs mt-1">平均完成率</div>
-          </div>
-          <div className="bg-gray-800 rounded-xl p-4 text-center">
-            <div className="text-2xl font-bold text-amber-400">{stats.total_hours || 0}</div>
-            <div className="text-gray-400 text-xs mt-1">总学习时长(h)</div>
-          </div>
-        </div>
-      )}
-
-      {/* 今日任务 */}
-      <div className="bg-gray-800 rounded-xl p-4">
-        <h2 className="text-lg font-bold text-white mb-4">📋 今日任务</h2>
-        {todaysTasks.length === 0 ? (
-          <div className="text-gray-400 text-sm py-8 text-center">今日没有安排任务，休息一天吧！</div>
-        ) : (
-          <div className="space-y-3">
-            {todaysTasks.map((task, i) => (
-              <label
-                key={i}
-                className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-colors ${
-                  checkedIds.has(task.title) ? 'bg-indigo-900/30 line-through text-gray-400' : 'bg-gray-700/50 hover:bg-gray-700'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={checkedIds.has(task.title)}
-                  onChange={() => {
-                    const next = new Set(checkedIds);
-                    next.has(task.title) ? next.delete(task.title) : next.add(task.title);
-                    setCheckedIds(next);
-                  }}
-                  className="w-4 h-4 rounded accent-indigo-500"
-                />
-                <div className="flex-1">
-                  <div className="text-white text-sm">{task.title}</div>
-                  {task.description && <div className="text-gray-400 text-xs mt-0.5">{task.description}</div>}
-                </div>
-                <div className="text-gray-500 text-xs">{task.est_hours}h</div>
-              </label>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 打卡表单 */}
-      {!submitted && todaysTasks.length > 0 && (
-        <div className="bg-gray-800 rounded-xl p-4 space-y-4">
-          <h2 className="text-lg font-bold text-white">📝 今日反馈</h2>
-
-          <div>
-            <div className="text-gray-400 text-sm mb-2">难度评分</div>
-            <div className="flex gap-2">
-              {[1,2,3,4,5].map(n => (
-                <button
-                  key={n}
-                  onClick={() => setDifficulty(n)}
-                  className={`w-10 h-10 rounded-lg text-lg ${
-                    n <= difficulty ? 'bg-amber-500 text-white' : 'bg-gray-700 text-gray-400'
-                  }`}
-                >{n}</button>
-              ))}
-              <span className="text-gray-400 text-xs self-center ml-2">
-                {['很简单','偏简单','适中','偏难','很难'][difficulty-1]}
-              </span>
+      {/* 进度统计 */}
+      <div className="bg-gray-800/80 rounded-xl p-6 border border-gray-700/50">
+        <h2 className="text-lg font-bold text-white mb-4">学习进度</h2>
+        <div className="flex items-center justify-around">
+          <ProgressRing
+            percentage={stats?.avg_completion_pct || 0}
+            color="#6366f1"
+            label={`${stats?.avg_completion_pct || 0}%`}
+            sublabel="平均完成率"
+          />
+          <div className="grid grid-cols-1 gap-4">
+            <div className="bg-gray-700/50 rounded-xl px-5 py-3 text-center">
+              <div className="text-2xl font-bold text-white">{stats?.total_days || 0}</div>
+              <div className="text-gray-400 text-xs mt-0.5">已完成天数</div>
+            </div>
+            <div className="bg-gray-700/50 rounded-xl px-5 py-3 text-center">
+              <div className="text-2xl font-bold text-emerald-400">{stats?.streak || 0}</div>
+              <div className="text-gray-400 text-xs mt-0.5">连续打卡</div>
+            </div>
+            <div className="bg-gray-700/50 rounded-xl px-5 py-3 text-center">
+              <div className="text-2xl font-bold text-amber-400">{stats?.total_hours || 0}</div>
+              <div className="text-gray-400 text-xs mt-0.5">总学习时长(h)</div>
             </div>
           </div>
-
-          <div>
-            <div className="text-gray-400 text-sm mb-2">完成度：{completion}%</div>
-            <input
-              type="range"
-              min="0" max="100" step="10"
-              value={completion}
-              onChange={e => setCompletion(Number(e.target.value))}
-              className="w-full accent-indigo-500"
-            />
-          </div>
-
-          <div className="flex gap-4 items-center">
-            <div className="text-gray-400 text-sm">实际学习时长：</div>
-            <input
-              type="number" min="0" max="12" step="0.5" value={hours}
-              onChange={e => setHours(Number(e.target.value))}
-              className="w-20 bg-gray-700 text-white rounded-lg px-3 py-2 text-center"
-            />
-            <span className="text-gray-400 text-sm">小时</span>
-          </div>
-
-          <div>
-            <div className="text-gray-400 text-sm mb-2">还想说什么？</div>
-            <textarea
-              value={feedback}
-              onChange={e => setFeedback(e.target.value)}
-              placeholder="例如：这部分内容偏难 / 练习不够 / 希望加速..."
-              className="w-full bg-gray-700 text-white rounded-lg px-4 py-3 h-20 resize-none outline-none focus:ring-2 focus:ring-indigo-500 placeholder-gray-500"
-            />
-          </div>
-
-          <button
-            onClick={handleCheckin}
-            disabled={checkedIds.size === 0}
-            className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-700 text-white rounded-xl py-3 font-medium transition-colors"
-          >
-            ✅ 提交打卡
-          </button>
         </div>
+      </div>
+
+      {/* 今日任务 */}
+      <div className="bg-gray-800/80 rounded-xl p-5 border border-gray-700/50">
+        <h2 className="text-lg font-bold text-white mb-2">
+          今日任务
+          <span className="text-sm font-normal text-gray-400 ml-2">
+            ({checkedIdsSet.size}/{todaysTasks.length} 已完成)
+          </span>
+        </h2>
+        {adjustedInfo?.adjusted && (
+          <div className="mb-3 p-2 bg-indigo-900/20 border border-indigo-700/30 rounded-lg">
+            <div className="text-indigo-300 text-xs font-medium">📊 计划已自适应调整</div>
+            <div className="text-gray-400 text-xs mt-0.5">{adjustedInfo.reason}</div>
+          </div>
+        )}
+        <TaskList
+          tasks={todaysTasks}
+          checkedIds={checkedIdsSet}
+          onToggle={toggleTodayTask}
+          disabled={submitted}
+        />
+      </div>
+
+      {/* 打卡反馈 */}
+      {!submitted && todaysTasks.length > 0 && (
+        <FeedbackForm
+          difficulty={difficulty}
+          completion={completion}
+          hours={hours}
+          feedback={feedback}
+          onDifficultyChange={setDifficulty}
+          onCompletionChange={() => {}}
+          onHoursChange={setHours}
+          onFeedbackChange={setFeedback}
+          onSubmit={handleCheckin}
+          disabled={checkedIdsSet.size === 0}
+          readOnlyCompletion
+        />
       )}
 
       {submitted && (
-        <div className="bg-emerald-900/30 border border-emerald-700 rounded-xl p-6 text-center">
-          <div className="text-3xl mb-2">🎉</div>
+        <div className="bg-emerald-900/20 border border-emerald-700/30 rounded-xl p-6 text-center">
+          <div className="text-4xl mb-3">🎉</div>
           <div className="text-emerald-300 text-lg font-medium">打卡成功！</div>
           <div className="text-gray-400 text-sm mt-1">继续坚持，你今天又前进了一步。</div>
+          {todayCheckin && (
+            <div className="mt-4 text-sm text-gray-400">
+              <div>完成度：{todayCheckin.completion}%</div>
+              <div>学习时长：{todayCheckin.hours} 小时</div>
+            </div>
+          )}
+          <div className="mt-4 p-3 bg-indigo-900/20 border border-indigo-700/30 rounded-lg text-left">
+            <div className="text-indigo-300 text-sm font-medium mb-1">📊 计划自适应</div>
+            {adjustedInfo?.adjusted ? (
+              <>
+                <div className="text-gray-300 text-xs mb-1">{adjustedInfo.reason}</div>
+                <div className="text-gray-500 text-xs">后续任务已根据你的完成情况动态调整，明天的任务会自动更新。</div>
+              </>
+            ) : (
+              <div className="text-gray-400 text-xs">
+                系统会持续追踪你的学习进度。如果连续几天提前完成或任务难度不合适，
+                会自动调整后续任务量和难度，让学习计划始终贴合你的节奏。
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

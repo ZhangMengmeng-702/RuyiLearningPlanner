@@ -1,5 +1,5 @@
 // === 学习规划助手 TypeScript 类型定义 ===
-// 与后端 JSON Schema 严格对应
+// 与后端 JSON Schema 严格对应（三人分工协作方案 v1.0）
 
 export interface Milestone {
   week_start: number;
@@ -11,14 +11,36 @@ export interface Milestone {
   difficulty: 1 | 2 | 3;
 }
 
+export interface TaskResource {
+  title: string;
+  url?: string;
+  type?: 'video' | 'article' | 'book' | 'course' | 'other';
+}
+
+export interface TaskExercise {
+  title: string;
+  url?: string;
+  description?: string;
+}
+
+export interface TaskItem {
+  id: string;
+  day?: number;
+  week?: number;
+  title: string;
+  description?: string;
+  est_hours: number;
+  resource_url?: string;
+  resource_title?: string;
+  resources?: TaskResource[];
+  exercises?: TaskExercise[];
+  completed?: boolean;
+}
+
 export interface DailyTask {
   day: number;
-  title: string;
-  description: string;
-  est_hours: number;
-  resource_title?: string;
-  resource_url?: string;
-  completed?: boolean;
+  week: number;
+  tasks: TaskItem[];
 }
 
 export interface PrerequisiteCheck {
@@ -40,7 +62,7 @@ export interface StudyPlan {
   total_weeks: number;
   created_at: string;
   milestones: Milestone[];
-  daily_tasks: DailyTask[];
+  daily_tasks: TaskItem[];
   prerequisite_check: PrerequisiteCheck;
   evaluation?: PlanEvaluation;
   adjusted?: boolean;
@@ -75,6 +97,17 @@ export interface ProgressStats {
   }[];
 }
 
+export interface TodayCheckin {
+  checked_in: boolean;
+  date: string;
+  day?: number;
+  difficulty?: number;
+  completion?: number;
+  hours?: number;
+  feedback?: string;
+  tasks_completed?: string[];
+}
+
 export interface ProfileData {
   user_id: string;
   exists: boolean;
@@ -86,4 +119,10 @@ export interface ProfileData {
     known_topics: string[];
     is_complete: boolean;
   };
+}
+
+// 消息类型
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
 }
